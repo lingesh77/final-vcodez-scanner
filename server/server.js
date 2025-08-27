@@ -163,7 +163,7 @@ app.post('/getstudents', async (req, res) => {
 });
  
 app.post('/addattendance', async (req, res)=>{
-    const{ presentStudents,absentStudents,trainer_id}= req.body;
+    const{ presentStudents,absentStudents,trainer_id,}= req.body;
     const Attendance = [
         ...presentStudents.map((student) => ({
             student_id: student.student_id,
@@ -238,10 +238,23 @@ app.post('/getattendance', async (req, res)=>{
     try {
         const db= newclient.db("vcodez");
         const attendanceCollection = db.collection("attendances");
+     /*    if(!batch_id ){
+             const attendance = await attendanceCollection.find({ trainer_id: trainer_id,
+                attandance_date:{
+            $gte: start,
+            $lte: end
+        }
+              }).toArray();
+            console.log("attendance",attendance)
+            res.status(200).json({ attendance: attendance });
+
+
+        } */
         
         if(!attandance_date){
             if(!batch_id){
             const attendance = await attendanceCollection.find({ trainer_id: trainer_id }).toArray();
+            console.log("attendance",attendance)
             res.status(200).json({ attendance: attendance });
 
 
@@ -266,11 +279,29 @@ app.post('/getattendance', async (req, res)=>{
     
 })
 app.post('/updateattendance',async(req,res)=>{
-    const { student_id,attendance_records}= req.body;
+    const { student_id,attendance_records,newdate,newstatus,trainer_id,batch_id,domain}= req.body;
     console.log('Received Student ID for updating attendance:', student_id,attendance_records);
     try{
         const db= newclient.db("vcodez");
         const attendanceCollection = db.collection("attendances");
+        if(newdate && newstatus){
+            const start = new Date(newdate);
+            start.setUTCHours(0, 0, 0, 0);
+            const end = new Date(newdate);
+            end.setUTCHours(23, 59, 59, 999);
+            await attendanceCollection.insertOne(
+                {
+                    student_id: student_id,
+                    status: newstatus,
+                    attandance_date: new Date(newdate),
+                    batch_id:batch_id,
+                    domain:domain,
+                    trainer_id:trainer_id,
+                }
+            )}
+                {
+                    
+        }
         for (const record of attendance_records) {
             const { attandance_date, status } = record;
             const start = new Date(attandance_date);
@@ -412,6 +443,73 @@ app.post('/deletestudent', async (req, res)=>{
     }
 })
 
+app.post('/getattadancefordashboard',async(req,res)=>{
+    const {attandance_date,trainer_id}=req.body
+    console.log("dashboard attadance:",attandance_date,trainer_id)
+     const start = new Date(attandance_date);
+    start.setUTCHours(0, 0, 0, 0);
+
+    const end = new Date(attandance_date);
+    end.setUTCHours(23, 59, 59, 999);
+    try{
+         const db= newclient.db("vcodez");
+        const attendanceCollection = db.collection("attendances");
+         const attendance = await attendanceCollection.find({ trainer_id: trainer_id,
+                attandance_date:{
+            $gte: start,
+            $lte: end
+        }
+              }).toArray();
+            console.log("attendance for dashboard",attendance)
+            res.status(200).json({ attendance: attendance });
+    }
+    catch(error){
+         console.error('Error fetching attendance:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        
+    }
+    
+})
+
+app.post('/addstudentattendance', async (req, res) => {
+  const { student_id, attandance_date, status, batch_id, domain, trainer_id } = req.body;
+  console.log('Received Student Attendance Data:', student_id, attandance_date, status, batch_id, domain, trainer_id);
+
+  try {
+    const db = newclient.db("vcodez");
+    const attendanceCollection = db.collection("attendances");
+
+    // Step 1: Check if attendance already exists for the same student on the same date
+    const existingAttendance = await attendanceCollection.findOne({
+      student_id: student_id,
+      attandance_date: new Date(attandance_date)  // match exact date
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        message: 'Attendance already marked for student on this date'
+      });
+    }
+
+    // Step 2: Insert if not found
+    const newAttendanceDoc = {
+      student_id: student_id,
+      status: status,
+      attandance_date: new Date(attandance_date),
+      batch_id: batch_id,
+      domain: domain,
+      trainer_id: trainer_id,
+    };
+
+    await attendanceCollection.insertOne(newAttendanceDoc);
+
+    res.status(201).json({ message: 'Attendance details saved successfully' });
+
+  } catch (error) {
+    console.error('Error saving attendance details:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 app.listen(process.env.PORT, () => {
   console.log(`✅ Server running on ${process.env.PORT}`);
 });

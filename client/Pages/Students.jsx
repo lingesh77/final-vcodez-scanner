@@ -16,7 +16,7 @@ export default function StudentDatabase(props) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingAttendance, setEditingAttendance] = useState({});
-  const[previousbatchId, setPreviousBatchId]=useState(null);
+  const [previousbatchId, setPreviousBatchId] = useState(null);
   const [editingStudentDetails, setEditingStudentDetails] = useState({
     student_email: '',
     student_phone_number: '',
@@ -237,7 +237,6 @@ export default function StudentDatabase(props) {
     };
     fetchBatches();
   }, []);
-console.log("previous batch id", previousbatchId)
   useEffect(() => {
     setSelectedAttendanceDate(null);
   }, [selectedBatch]);
@@ -316,7 +315,7 @@ console.log("previous batch id", previousbatchId)
   // Handle batch change in edit mode
   const handleEditBatchChange = async (newBatchId) => {
     const previousBatchId = editingStudentDetails.batch_id;
-    
+
     setEditingStudentDetails(prev => ({
       ...prev,
       batch_id: newBatchId
@@ -325,7 +324,7 @@ console.log("previous batch id", previousbatchId)
     // Check if batch actually changed
     if (newBatchId !== selectedStudent.batch_id) {
       setIsBatchChanged(true);
-      
+
       // Generate new QR code with updated batch information
       try {
         const newBatch = batches.find(b => b.batch_id === newBatchId);
@@ -334,7 +333,7 @@ console.log("previous batch id", previousbatchId)
             ...selectedStudent,
             batch_id: newBatchId
           };
-          
+
           const newQRCode = await generateQRCode(updatedStudentData, newBatch);
           if (newQRCode) {
             setBatchChangedQRCode(newQRCode);
@@ -351,6 +350,7 @@ console.log("previous batch id", previousbatchId)
     }
   };
 
+  // Edit mode: update attendance history and/or details
   const handleSaveChanges = async () => {
     try {
       const newAttendance = Object.values(editingAttendance);
@@ -376,7 +376,7 @@ console.log("previous batch id", previousbatchId)
       let detailsUpdated = false;
 
       try {
-        // Update Attendance
+        // Update Attendance History
         const response = await axios.post('http://localhost:5000/updateattendance', {
           student_id: selectedStudent.student_id,
           attendance_records: newAttendance,
@@ -403,7 +403,7 @@ console.log("previous batch id", previousbatchId)
           if (updateResponse.data.message === 'Student details updated successfully') {
             detailsUpdated = true;
             fetchStudents();
-            
+
             // Update the selected student with new details
             const updatedBatch = batches.find(b => b.batch_id === editingStudentDetails.batch_id);
             setSelectedStudent(prev => ({
@@ -413,7 +413,6 @@ console.log("previous batch id", previousbatchId)
               batch_id: editingStudentDetails.batch_id,
               student_domain: updatedBatch ? updatedBatch.domain : prev.student_domain
             }));
-
             // Download QR code if batch was changed
             if (isBatchChanged && batchChangedQRCode) {
               downloadBatchChangedQRCode();
@@ -429,7 +428,7 @@ console.log("previous batch id", previousbatchId)
         // Reset batch change tracking
         setIsBatchChanged(false);
         setBatchChangedQRCode(null);
-    
+
       } catch (error) {
         console.error('Error updating data:', error);
         toast.error('Failed to save changes');
@@ -440,6 +439,48 @@ console.log("previous batch id", previousbatchId)
       toast.error('Failed to save changes');
     }
   };
+
+  // NEW: Attendance update function, only for adding one day's attendance entry!
+  const updateAttendance = async () => {
+  if (!newAttendanceDate) {
+    toast.error('Please select a date');
+    return;
+  }
+
+  try {
+    const response = await axios.post('http://localhost:5000/addstudentattendance', {
+      student_id: selectedStudent.student_id,
+      attandance_date: newAttendanceDate,
+      status: newAttendanceStatus,
+      trainer_id: props.user.trainer_id,
+      batch_id: selectedStudent.batch_id,
+      domain: selectedStudent.student_domain
+    });
+
+    if (response.status === 201 && response.data.message === 'Attendance details saved successfully') {
+      toast.success('Attendance added!');
+      setMarkedAttendance(prev => [
+        ...prev,
+        {
+          student_id: selectedStudent.student_id,
+          attandance_date: newAttendanceDate,
+          status: newAttendanceStatus,
+        }
+      ]);
+      setNewAttendanceDate('');
+      setNewAttendanceStatus('Present');
+    } else {
+      toast.error(response.data.message || 'Failed to add attendance');
+    }
+  } catch (error) {
+    if (error.response && error.response.data.message) {
+      toast.error(error.response.data.message); // e.g. "Attendance already marked..."
+    } else {
+      toast.error('Error adding attendance');
+    }
+  }
+};
+
 
   const downloadBatchChangedQRCode = () => {
     if (batchChangedQRCode) {
@@ -488,7 +529,6 @@ console.log("previous batch id", previousbatchId)
   };
 
   // Add Student Modal functions
-
   const handleAddStudentFormChange = (field, value) => {
     setAddStudentForm(prev => ({
       ...prev,
@@ -554,7 +594,6 @@ console.log("previous batch id", previousbatchId)
 
       if (response.data.message === 'Student details saved successfully') {
         setStudents(prev => [...prev, studentData]);
-
         toast.success(`${studentData.student_name} added successfully!`);
         downloadQRCode();
         closeAddStudentModal();
@@ -588,6 +627,11 @@ console.log("previous batch id", previousbatchId)
       link.click();
     }
   };
+
+  // Attendance calendar state for add attendance
+  const [newAttendanceDate, setNewAttendanceDate] = useState('');
+  const [newAttendanceStatus, setNewAttendanceStatus] = useState('Present');
+
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -694,7 +738,6 @@ console.log("previous batch id", previousbatchId)
                         attendance.attandance_date === selectedAttendanceDate
                       )
                     : null;
-
                   return (
                     <tr key={student.student_id} className="hover:bg-gray-50">
                       <td className="py-4 px-6 text-gray-900 font-medium">{student.student_id}</td>
@@ -810,7 +853,37 @@ console.log("previous batch id", previousbatchId)
                     <p className="text-gray-600">{selectedStudent.student_id}</p>
                   </div>
                 </div>
-
+                {/* NEW: Add Attendance Calendar & Status UI (Only visible NOT in edit mode) */}
+                {!isEditMode && (
+                  <div className="mb-6 flex items-center gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-900">Add Attendance</label>
+                      <div className="flex gap-2 items-center mt-1">
+                        <input
+                          type="date"
+                          value={newAttendanceDate}
+                          onChange={e => setNewAttendanceDate(e.target.value)}
+                          className="border border-gray-300 px-2 py-1 rounded"
+                        />
+                        <select
+                          value={newAttendanceStatus}
+                          onChange={e => setNewAttendanceStatus(e.target.value)}
+                          className="border border-gray-300 px-2 py-1 rounded"
+                        >
+                          <option value="Present">Present</option>
+                          <option value="Absent">Absent</option>
+                        </select>
+                        <button
+                          onClick={updateAttendance}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-medium"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Pick date, select status, then add attendance for this student.</p>
+                    </div>
+                  </div>
+                )}
                 {/* New QR Code Preview Section */}
                 {batchChangedQRCode && isBatchChanged && (
                   <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -861,7 +934,6 @@ console.log("previous batch id", previousbatchId)
                         )}
                       </div>
                     </div>
-
                     {/* Editable Phone */}
                     <div className="flex items-center gap-3 mb-2">
                       <User className="w-5 h-5 text-gray-400" />
@@ -881,7 +953,6 @@ console.log("previous batch id", previousbatchId)
                         )}
                       </div>
                     </div>
-
                     {/* Editable Batch */}
                     <div className="flex items-center gap-3">
                       <BookOpen className="w-5 h-5 text-gray-400" />
@@ -910,7 +981,6 @@ console.log("previous batch id", previousbatchId)
                       </div>
                     </div>
                   </div>
-
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
                       <TrendingUp className="w-5 h-5 text-gray-400" />
@@ -923,7 +993,6 @@ console.log("previous batch id", previousbatchId)
                         </div>
                       </div>
                     </div>
-
                     <div className="flex items-center gap-3">
                       <Calendar className="w-5 h-5 text-gray-400" />
                       <div>
@@ -972,7 +1041,6 @@ console.log("previous batch id", previousbatchId)
                   </div>
                 </div>
               </div>
-
               {/* Modal Footer */}
               <div className="flex justify-between items-center p-6 border-t border-gray-200 bg-white">
                 {isEditMode ? (
@@ -1113,7 +1181,6 @@ console.log("previous batch id", previousbatchId)
                     </div>
                   )}
                 </form>
-
                 {/* QR Code Generation Section */}
                 {!generatedQRCode ? (
                   <div className="mt-6 pt-6 border-t border-gray-200">
