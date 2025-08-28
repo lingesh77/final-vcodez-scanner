@@ -146,7 +146,7 @@ export default function StudentDatabase(props) {
   };
 
   const filteredStudents = getStudentsWithAttendanceRates().filter(student => {
-    const matchesSearch = student.student_name.toLowerCase().includes(searchQuery.toLowerCase());
+const matchesSearch = student.student_name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
     const matchesBatch = selectedBatch === null || student.batch_id === selectedBatch.batch_id;
     let matchesAttendanceDate = true;
     if (selectedAttendanceDate) {

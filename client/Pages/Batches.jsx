@@ -65,7 +65,6 @@ export default function BatchQRApp(props) {
     'Weekend Intensive 9AM-9PM'
   ];
 
-
   // Pagination states
   const studentsPerPage = 4;
   const indexOfLastStudent = currentPage * studentsPerPage;
@@ -94,27 +93,50 @@ export default function BatchQRApp(props) {
     fetchBatches();
   }, [props.user.trainer_id]);
 
-  // Generate unique IDs
-  const generateUniqueStudentId = () => {
-    const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    return `VCS${randomNum}`;
+  // Generate unique IDs - Enhanced with better collision prevention
+  const generateUniqueStudentId = (existingIds = new Set()) => {
+    let attempts = 0;
+    let newId;
+    
+    do {
+      const timestamp = Date.now().toString().slice(-4);
+      const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      newId = `VCS${timestamp}${randomNum}`.slice(0, 10); // Ensure consistent length
+      attempts++;
+      
+      // Prevent infinite loop
+      if (attempts > 100) {
+        newId = `VCS${Date.now()}${Math.random().toString(36).substr(2, 5)}`.slice(0, 10);
+        break;
+      }
+    } while (existingIds.has(newId));
+    
+    return newId;
   };
 
   const generateUniqueBatchID = () => {
-    const randomNum = Math.floor(Math.random() * 10000).toString().padStart(7, '0');
-    return `VCB${randomNum}`;
+    const timestamp = Date.now().toString();
+    const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    return `VCB${timestamp}${randomNum}`.slice(0, 15);
   };
 
+  // Enhanced function to generate unique IDs with better collision handling
   const generateUniqueIds = (studentsCount) => {
     const ids = new Set();
     const uniqueIds = [];
-    while (uniqueIds.length < studentsCount) {
-      const newId = generateUniqueStudentId();
-      if (!ids.has(newId)) {
-        ids.add(newId);
-        uniqueIds.push(newId);
-      }
+    
+    console.log(`Starting ID generation for ${studentsCount} students`);
+    
+    // Keep generating until we have exactly the required number of unique IDs
+    for (let i = 0; i < studentsCount; i++) {
+      const newId = generateUniqueStudentId(ids);
+      ids.add(newId);
+      uniqueIds.push(newId);
     }
+    
+    console.log(`Successfully generated ${uniqueIds.length} unique IDs for ${studentsCount} students`);
+    console.log('Sample IDs:', uniqueIds.slice(0, 3));
+    
     return uniqueIds;
   };
 
@@ -196,7 +218,6 @@ export default function BatchQRApp(props) {
 
     } catch (error) {
       console.error('Error generating QR code:', error);
-      // Fallback QR generation code can go here if needed (same as your original)
       return null;
     }
   };
@@ -220,26 +241,64 @@ export default function BatchQRApp(props) {
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-        setExcelData(jsonData);
-        setStoredJsonData(jsonData);
+        console.log(`Raw Excel data loaded: ${jsonData.length} rows`);
+        
+        // Filter out empty rows and clean data
+        const cleanedData = jsonData.filter(student => {
+          const studentName = student.student_name || student.name || student.Name;
+          return studentName && String(studentName).trim() !== '';
+        });
+
+        // Remove any potential duplicates from Excel data itself
+        const uniqueStudents = cleanedData.filter((student, index, self) => {
+          const studentName = (student.student_name || student.name || student.Name || '').toString().trim().toLowerCase();
+          const email = (student.email || student.Email || '').toString().trim().toLowerCase();
+          
+          // Check for duplicates based on name or email
+          return index === self.findIndex(s => {
+            const sName = (s.student_name || s.name || s.Name || '').toString().trim().toLowerCase();
+            const sEmail = (s.email || s.Email || '').toString().trim().toLowerCase();
+            
+            // Consider duplicate if same name OR same email (if email exists)
+            return sName === studentName || (email && sEmail && sEmail === email);
+          });
+        });
+
+        console.log(`After cleaning: ${cleanedData.length} valid rows`);
+        console.log(`After removing duplicates: ${uniqueStudents.length} unique students`);
+
+        if (uniqueStudents.length === 0) {
+          alert('No valid student data found in the Excel file. Please check the format.');
+          setLoading(false);
+          return;
+        }
+
+        setExcelData(uniqueStudents);
+        setStoredJsonData(uniqueStudents);
         setCurrentPage(1);
         setLoading(false);
 
       } catch (error) {
-        console.error(error);
+        console.error('Error parsing Excel file:', error);
+        alert('Error reading Excel file. Please ensure it\'s a valid .xlsx or .xls file.');
         setLoading(false);
       }
     };
     reader.readAsBinaryString(file);
   };
 
-  // Generate QR codes for all students
+  // Generate QR codes for all students - Enhanced with progress tracking
   const generateAllQRCodes = async () => {
     if (!excelData.length || !batchName || !domainName || !timings) {
+      alert('Please fill in all fields and upload student data before generating QR codes.');
       return;
     }
+    
+    console.log(`=== Starting QR Code Generation ===`);
+    console.log(`Students to process: ${excelData.length}`);
+    
     setProcessing(true);
-    setQrCodes([]);
+    setQrCodes([]); // Clear any existing QR codes
 
     const newBatchId = generateUniqueBatchID();
     setBatchUniqueId(newBatchId);
@@ -251,28 +310,66 @@ export default function BatchQRApp(props) {
       timings
     };
 
+    // Generate exactly the same number of unique IDs as students
     const uniqueIds = generateUniqueIds(excelData.length);
     const qrResults = [];
 
+    console.log(`Generated unique IDs:`, uniqueIds);
+
+    // Process each student exactly once with progress tracking
     for (let i = 0; i < excelData.length; i++) {
-      const qr = await generateQRCode(excelData[i], i, batchInfo, uniqueIds[i]);
-      if (qr) qrResults.push(qr);
-      if (i < excelData.length - 1) await new Promise(res => setTimeout(res, 100));
+      try {
+        console.log(`Processing student ${i + 1}/${excelData.length}: ${excelData[i].student_name || excelData[i].name || 'Unknown'}`);
+        
+        const qr = await generateQRCode(excelData[i], i, batchInfo, uniqueIds[i]);
+        if (qr) {
+          qrResults.push(qr);
+          console.log(`✓ QR code generated for student ${i + 1} (ID: ${uniqueIds[i]})`);
+        } else {
+          console.error(`✗ Failed to generate QR code for student ${i + 1}`);
+        }
+        
+        // Small delay to prevent overwhelming the browser
+        if (i < excelData.length - 1) {
+          await new Promise(res => setTimeout(res, 50));
+        }
+      } catch (error) {
+        console.error(`Error generating QR code for student ${i + 1}:`, error);
+      }
+    }
+
+    console.log(`=== QR Code Generation Complete ===`);
+    console.log(`Expected: ${excelData.length} QR codes`);
+    console.log(`Generated: ${qrResults.length} QR codes`);
+    console.log(`Success rate: ${((qrResults.length / excelData.length) * 100).toFixed(1)}%`);
+
+    if (qrResults.length !== excelData.length) {
+      alert(`Warning: Expected ${excelData.length} QR codes but only generated ${qrResults.length}. Some QR codes may have failed to generate.`);
     }
 
     setQrCodes(qrResults);
     setProcessing(false);
   };
 
-  // Create batch and download ZIP of QR codes
+  // Create batch and download ZIP of QR codes - Fixed to ensure exact student count
   const createBatchWithStudents = async () => {
     if (!batchName || !domainName || !timings || !excelData.length || !qrCodes.length) {
+      console.log('Missing required data for batch creation');
       return;
     }
 
+    // Ensure we have the same number of students and QR codes
+    if (excelData.length !== qrCodes.length) {
+      console.error(`Mismatch: ${excelData.length} students but ${qrCodes.length} QR codes`);
+      return;
+    }
+
+    // Map each student with their corresponding QR code data
     const enhancedExcelData = excelData.map((student, index) => ({
       ...student,
-      studentId: qrCodes[index].studentId
+      studentId: qrCodes[index].studentId,
+      qrGenerated: true,
+      createdAt: new Date().toISOString()
     }));
 
     const newBatch = {
@@ -280,37 +377,49 @@ export default function BatchQRApp(props) {
       title: batchName,
       description: `${domainName} course`,
       status: "Active",
-      students: enhancedExcelData,
+      students: enhancedExcelData, // This will have exactly the same count as Excel
       schedule: timings,
       domain: domainName,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      studentCount: enhancedExcelData.length // Explicit count for verification
     };
 
+    console.log(`Creating batch with ${newBatch.students.length} students`);
+
+    // Update local state first
     setBatches([newBatch, ...batches]);
 
     try {
+      // Send to backend
       const response = await axios.post('http://localhost:5000/createbatch', {
         user_data: props.user,
         newBatch,
       });
 
+      console.log('Batch created successfully:', response.data);
+
+      // Generate ZIP file with QR codes
       const zip = new JSZip();
       for (let i = 0; i < qrCodes.length; i++) {
         const qr = qrCodes[i];
-        const resp = await fetch(qr.imageDataUrl);
-        const blob = await resp.blob();
-        zip.file(qr.imageName, blob);
+        try {
+          const resp = await fetch(qr.imageDataUrl);
+          const blob = await resp.blob();
+          zip.file(qr.imageName, blob);
+        } catch (error) {
+          console.error(`Error adding QR code ${i} to zip:`, error);
+        }
       }
+      
       const content = await zip.generateAsync({ type: "blob" });
       saveAs(content, `${batchName.replace(/\s+/g, '_')}_QR_Codes.zip`);
 
-      // Optionally show success message
-      // toast.success('Batch created and ZIP downloaded successfully!');
+      console.log(`ZIP file created with ${qrCodes.length} QR codes`);
 
     } catch (error) {
       console.error('Error creating batch:', error);
-      // Optionally show error message
-      // toast.error('Failed to create batch. Please try again.');
+      // Remove from local state if backend creation failed
+      setBatches(batches);
     }
 
     // Reset form and state
@@ -511,7 +620,49 @@ export default function BatchQRApp(props) {
               </div>
             )}
 
-            {/* Action Buttons */}
+            {/* Processing Status */}
+            {processing && (
+              <div className="bg-blue-50 rounded-lg p-6 mb-6">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                  <h3 className="text-lg font-semibold text-blue-800 mb-2">Generating QR Codes...</h3>
+                  <p className="text-blue-600">
+                    Processing {excelData.length} students. This may take a few moments.
+                  </p>
+                  <div className="mt-4 bg-white rounded-full h-2 overflow-hidden">
+                    <div 
+                      className="bg-blue-500 h-full transition-all duration-300 ease-out"
+                      style={{ width: `${(qrCodes.length / excelData.length) * 100}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-sm text-blue-500 mt-2">
+                    {qrCodes.length} / {excelData.length} completed
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Validation Warnings */}
+            {excelData.length > 0 && qrCodes.length > 0 && qrCodes.length !== excelData.length && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-yellow-800">
+                      QR Code Count Mismatch
+                    </h3>
+                    <p className="mt-1 text-sm text-yellow-700">
+                      Expected {excelData.length} QR codes but generated {qrCodes.length}. 
+                      Some QR codes may have failed to generate. Please try regenerating.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex gap-4">
               <button
                 onClick={generateAllQRCodes}
@@ -527,13 +678,13 @@ export default function BatchQRApp(props) {
               {qrCodes.length > 0 && (
                 <button
                   onClick={createBatchWithStudents}
-                  disabled={!qrCodes.length}
+                  disabled={!qrCodes.length || qrCodes.length !== excelData.length}
                   className={`bg-blue-500 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 ${
-                    !qrCodes.length ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'
+                    !qrCodes.length || qrCodes.length !== excelData.length ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'
                   }`}
                 >
                   <Download size={16} />
-                  Create Batch & Download ZIP
+                  Create Batch & Download ZIP ({qrCodes.length}/{excelData.length})
                 </button>
               )}
             </div>
@@ -609,8 +760,6 @@ export default function BatchQRApp(props) {
               <div className="flex gap-3">
                 <button className="flex-1 text-gray-600 hover:text-gray-800 py-2 px-3 text-sm font-medium bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-1"
                 onClick={() => navigate('/students')}
- 
-
                 >
                   <Users size={14} />
                   View Students
